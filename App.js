@@ -11,12 +11,24 @@ import {
   Vibration,
   Dimensions,
   ScrollView,
+  Modal,
 } from "react-native";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+// --- FIREBASE IMPORTS ---
+import { db } from "./firebaseConfig"; // Ensure this file exists
+import { 
+  collection, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy, 
+  serverTimestamp 
+} from "firebase/firestore";
+
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { BarChart } from "react-native-chart-kit";
-import * as Notifications from "expo-notifications";
 
 export default function App() {
   const [page, setPage] = useState("login");
@@ -25,7 +37,7 @@ export default function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  // Inventory & Reports
+  // Data
   const [items, setItems] = useState([]);
   const [reports, setReports] = useState([]);
 
@@ -34,120 +46,143 @@ export default function App() {
   const [scanning, setScanning] = useState(false);
   const [scanLock, setScanLock] = useState(false);
 
-  // Sidebar toggle
+  // UI
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Notification Panel
-  const [notifications, setNotifications] = useState([]);
-
-  // Load saved inventory + reports
+  // ---------------------------------------------------------
+  // 1. REAL-TIME DATABASE LISTENERS (Matches renderers.js)
+  // ---------------------------------------------------------
   useEffect(() => {
-    (async () => {
-      const inv = JSON.parse(await AsyncStorage.getItem("inventory") || "[]");
-      const rep = JSON.parse(await AsyncStorage.getItem("reports") || "[]");
-      setItems(inv);
-      setReports(rep);
+    // Permission check
+    if (!permission) requestPermission();
 
-      if (!permission) await requestPermission();
+    // Listen to Inventory
+    const qInventory = query(collection(db, "inventory"), orderBy("name"));
+    const unsubInv = onSnapshot(qInventory, (snapshot) => {
+      const list = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setItems(list);
+    });
 
-      await Notifications.requestPermissionsAsync();
-    })();
+    // Listen to Reports
+    const qReports = query(collection(db, "reports"), orderBy("timestamp", "desc"));
+    const unsubRep = onSnapshot(qReports, (snapshot) => {
+      const list = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        // Convert timestamp to readable string if it exists
+        const dateStr = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString() : "Just now";
+        return { ...data, id: doc.id, displayDate: dateStr };
+      });
+      setReports(list);
+    });
+
+    return () => {
+      unsubInv();
+      unsubRep();
+    };
   }, []);
 
-  const saveInventory = async (list) => {
-    setItems(list);
-    await AsyncStorage.setItem("inventory", JSON.stringify(list));
-  };
-
-  const saveReports = async (list) => {
-    setReports(list);
-    await AsyncStorage.setItem("reports", JSON.stringify(list));
-  };
-
-  // 🔔 Add notification (auto-hide after 5 sec)
-  const notifyNewReport = (report) => {
-    const id = Date.now();
-    const notif = { ...report, id };
-
-    setNotifications((prev) => [notif, ...prev]);
-
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    }, 5000);
-  };
-
-  // Login function
-  const login = () => {
-    if (
-      (username === "admin" && password === "admin") ||
-      (username === "manager" && password === "manager")
-    ) {
-      setPage("dashboard");
-    } else {
-      Alert.alert("Invalid Login", "Use admin/admin or manager/manager");
-    }
-  };
-
-  const logout = () => {
-    setUsername("");
-    setPassword("");
-    setPage("login");
-  };
-
-  // ---------------------------------------------------------------------------
-  //  UPDATED QR SCAN — now saves PCS, BOX, TUB prices
-  // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------
+  // 2. SCANNING LOGIC (Matches Electron Structure)
+  // ---------------------------------------------------------
   const onScan = async ({ data }) => {
     if (scanLock) return;
     setScanLock(true);
     Vibration.vibrate(200);
 
+    // Try to parse JSON (like your Electron QR generator makes)
     let parsed;
     try {
       parsed = JSON.parse(data);
     } catch {
-      parsed = { productName: data, quantity: 1, unit: "pcs" };
+      // Fallback for plain text
+      parsed = { name: data, unit: "pcs", prices: { pcs: 0, box: 0, tub: 0 } };
     }
 
-    const newItem = {
-      id: Date.now(),
-      productName: parsed.productName || parsed.name || data,
-      quantity: parsed.quantity || 1,
-      unit: parsed.unit || "pcs",
-
-      // NEW FIELDS for PCS / BOX / TUB prices
-      pricePCS: parsed.pricePCS || 0,
-      priceBOX: parsed.priceBOX || 0,
-      priceTUB: parsed.priceTUB || 0,
-
-      date: new Date().toISOString().slice(0, 10),
+    // NORMALIZE DATA
+    const scanName = parsed.name || parsed.productName || data;
+    const scanUnit = parsed.unit || "pcs";
+    // Handle price structure (if scan is flat vs nested)
+    const scanPrices = parsed.prices || {
+      pcs: parsed.pricePCS || 0,
+      box: parsed.priceBOX || 0,
+      tub: parsed.priceTUB || 0,
     };
 
-    await saveInventory([newItem, ...items]);
+    // CHECK DUPLICATES
+    const existingItem = items.find(
+      (i) => i.name.toLowerCase() === scanName.toLowerCase()
+    );
 
-    const newReport = { 
-      ...newItem,
-      savedAt: new Date().toISOString(),
-    };
+    try {
+      if (existingItem) {
+        // UPDATE Existing
+        const newQty = (existingItem.quantity || 0) + 1;
+        await updateDoc(doc(db, "inventory", existingItem.id), {
+          quantity: newQty,
+        });
+        Alert.alert("Updated", `Added +1 to ${existingItem.name}`);
+        
+        // Log Report
+        await addReport(existingItem.name, "RESTOCK", 1, existingItem.prices, scanUnit);
+      } else {
+        // CREATE New
+        const newItem = {
+          name: scanName,
+          quantity: 1,
+          unit: scanUnit,
+          date: new Date().toISOString().slice(0, 10),
+          prices: scanPrices, // Save as nested object to match Electron
+        };
+        await addDoc(collection(db, "inventory"), newItem);
+        Alert.alert("Success", "New Item Added");
 
-    await saveReports([newReport, ...reports]);
+        // Log Report
+        await addReport(newItem.name, "NEW ITEM", 1, newItem.prices, scanUnit);
+      }
+    } catch (error) {
+      Alert.alert("Error", error.message);
+    }
 
-    notifyNewReport(newReport);
-
-    Alert.alert("Success", "QR scanned and item saved", [
-      {
-        text: "OK",
-        onPress: () => {
-          setScanning(false);
-          setScanLock(false);
-          setPage("inventory");
-        },
-      },
-    ]);
+    setScanning(false);
+    setTimeout(() => setScanLock(false), 2000);
   };
-  // ---------------------------------------------------------------------------
 
-  // Sidebar menu
+  const addReport = async (name, type, qty, prices, unit) => {
+    const unitPrice = prices?.[unit] || 0;
+    await addDoc(collection(db, "reports"), {
+      name,
+      type,
+      quantity: qty,
+      unitPrice,
+      date: new Date().toISOString().split('T')[0],
+      timestamp: serverTimestamp(),
+    });
+  };
+
+  // ---------------------------------------------------------
+  // 3. UI COMPONENTS
+  // ---------------------------------------------------------
+  
+  const login = () => {
+    // 1. Define accounts exactly like in your Electron app
+    const accounts = { 
+        admin: "admin123", 
+        manager: "manager123" 
+    };
+
+    // 2. Check if username exists AND password matches
+    if (accounts[username] && accounts[username] === password) {
+       setPage("dashboard");
+       setUsername(""); // Optional: Clear fields after login
+       setPassword("");
+    } else {
+       Alert.alert("Access Denied", "Invalid username or password");
+    }
+  };
+
   const Menu = () => (
     <View style={[styles.menu, { left: menuOpen ? 0 : -220 }]}>
       <Text style={styles.menuTitle}>Inventory App</Text>
@@ -160,272 +195,186 @@ export default function App() {
             setMenuOpen(false);
           }}
         >
-          <Text style={styles.menuText}>
-            {p.charAt(0).toUpperCase() + p.slice(1)}
-          </Text>
+          <Text style={styles.menuText}>{p.toUpperCase()}</Text>
         </TouchableOpacity>
       ))}
-      <View style={{ flex: 1 }} />
-      <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-        <Text style={{ color: "white", fontWeight: "700" }}>Logout</Text>
+      <TouchableOpacity style={styles.logoutButton} onPress={() => setPage("login")}>
+        <Text style={{ color: "white" }}>Logout</Text>
       </TouchableOpacity>
     </View>
   );
 
-  // Login Page
-  if (page === "login")
+  if (page === "login") {
     return (
       <View style={styles.containerCentered}>
-        <Text style={styles.title}>Inventory Management</Text>
-        <TextInput
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-          style={styles.input}
-        />
-        <TextInput
-          placeholder="Password"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-          style={styles.input}
-        />
+        <Text style={styles.title}>Inventory Mobile</Text>
+        <TextInput placeholder="Username" style={styles.input} onChangeText={setUsername} />
+        <TextInput placeholder="Password" secureTextEntry style={styles.input} onChangeText={setPassword} />
         <Button title="Login" onPress={login} />
       </View>
     );
+  }
 
-  // Stats
-  const totalItems = items.length;
-  const lowStock = items.filter((i) => i.quantity <= (i.low || 5)).length;
+  // Stats for Dashboard
+  const lowStockCount = items.filter(i => i.quantity < 5).length;
+  const totalValue = items.reduce((acc, curr) => {
+     const p = curr.prices?.[curr.unit] || 0;
+     return acc + (curr.quantity * p);
+  }, 0);
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: "#f5f5f5" }}>
       <Menu />
-
-      {/* Notification Panel */}
-      <View style={styles.notifContainer}>
-        {notifications.map((notif) => (
-          <View key={notif.id} style={styles.notifPanel}>
-            <TouchableOpacity
-              style={styles.notifCloseBtn}
-              onPress={() =>
-                setNotifications((prev) =>
-                  prev.filter((n) => n.id !== notif.id)
-                )
-              }
-            >
-              <Text style={{ color: "white", fontWeight: "700" }}>✕ Close</Text>
-            </TouchableOpacity>
-            <Text style={styles.notifTitle}>New Report Added</Text>
-            <Text style={{ fontWeight: "700" }}>{notif.productName}</Text>
-            <Text>Qty: {notif.quantity}</Text>
-            <Text>Saved: {notif.savedAt.slice(0, 19)}</Text>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.menuToggle}>
+      
+      {/* Header */}
+      <View style={styles.header}>
         <TouchableOpacity onPress={() => setMenuOpen(!menuOpen)}>
           <Text style={{ fontSize: 24 }}>☰</Text>
         </TouchableOpacity>
+        <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{page.toUpperCase()}</Text>
+        <View style={{width: 20}} />
       </View>
 
-      <ScrollView style={styles.mainContent} contentContainerStyle={{ padding: 16 }}>
-
-        {/* DASHBOARD */}
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        
+        {/* DASHBOARD VIEW */}
         {page === "dashboard" && (
           <View>
-            <Text style={styles.pageTitle}>Dashboard</Text>
-            <Text style={styles.dashboardText}>Total Items: {totalItems}</Text>
-            <Text style={styles.dashboardText}>Low Stock Alerts: {lowStock}</Text>
-
-            {items.length > 0 && (
-              <BarChart
-                data={{
-                  labels: items.map((i) => i.productName).slice(0, 6),
-                  datasets: [{ data: items.map((i) => i.quantity).slice(0, 6) }],
-                }}
-                width={Dimensions.get("window").width - 40}
-                height={220}
-                chartConfig={{
-                  backgroundGradientFrom: "#f0f4f7",
-                  backgroundGradientTo: "#f0f4f7",
-                  decimalPlaces: 0,
-                  color: (opacity) => `rgba(0,100,200,${opacity})`,
-                  labelColor: () => "#333",
-                }}
-                style={{ marginTop: 16, borderRadius: 12 }}
-              />
-            )}
+             <View style={styles.card}>
+               <Text>Total Items: {items.length}</Text>
+               <Text>Total Value: ₱{totalValue.toLocaleString()}</Text>
+               <Text style={{color:'red'}}>Low Stock: {lowStockCount}</Text>
+             </View>
+             
+             {items.length > 0 && (
+                <BarChart
+                  data={{
+                    labels: items.slice(0,5).map(i => i.name.substring(0,5)),
+                    datasets: [{ data: items.slice(0,5).map(i => i.quantity) }]
+                  }}
+                  width={Dimensions.get("window").width - 40}
+                  height={220}
+                  chartConfig={{
+                    backgroundColor: "#ffffff",
+                    backgroundGradientFrom: "#ffffff",
+                    backgroundGradientTo: "#ffffff",
+                    color: (opacity) => `rgba(0, 0, 0, ${opacity})`,
+                  }}
+                  style={{ borderRadius: 8, marginTop: 10 }}
+                />
+             )}
           </View>
         )}
 
-        {/* INVENTORY */}
+        {/* INVENTORY VIEW */}
         {page === "inventory" && (
           <View>
-            <Text style={styles.pageTitle}>Inventory</Text>
-
-            {/*  SCAN BUTTON MOVED TO TOP */}
-            <View style={{ marginBottom: 20 }}>
-              {!permission?.granted ? (
-                <Button title="Allow Camera" onPress={requestPermission} />
-              ) : !scanning ? (
-                <Button title="Scan QR Code" onPress={() => setScanning(true)} />
-              ) : (
-                <View style={{ height: 350, marginTop: 10 }}>
-                  <CameraView
-                    style={{ flex: 1, borderRadius: 12 }}
-                    onBarcodeScanned={scanLock ? undefined : onScan}
-                    barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                  />
-                  <Button title="Stop Scan" onPress={() => setScanning(false)} />
+            <Button title="Scan QR" onPress={() => setScanning(true)} />
+            
+            {/* INVENTORY LIST */}
+            {items.map((item) => (
+              <View key={item.id} style={styles.row}>
+                <View style={{flex:1}}>
+                  <Text style={{fontWeight:'bold', fontSize:16}}>{item.name}</Text>
+                  <Text style={{color:'#666'}}>{item.unit} | {item.date}</Text>
                 </View>
-              )}
-            </View>
-
-            <View style={[styles.row, { backgroundColor: "#e6eef5" }]}>
-              <Text style={[styles.itemText, { fontWeight: "700", flex: 1 }]}>Product</Text>
-              <Text style={[styles.itemText, { fontWeight: "700", flex: 1 }]}>Qty</Text>
-              <Text style={[styles.itemText, { fontWeight: "700", flex: 1 }]}>Date</Text>
-              <Text style={[styles.itemText, { fontWeight: "700", flex: 1 }]}>Unit</Text>
-              <Text style={[styles.itemText, { fontWeight: "700", flex: 1 }]}>Prices</Text>
-            </View>
-
-            <FlatList
-              data={items}
-              keyExtractor={(i) => String(i.id)}
-              renderItem={({ item }) => (
-                <View style={styles.row}>
-                  <Text style={[styles.itemText, { flex: 1 }]}>{item.productName}</Text>
-                  <Text style={[styles.itemText, { flex: 1 }]}>{item.quantity}</Text>
-                  <Text style={[styles.itemText, { flex: 1 }]}>{item.date}</Text>
-                  <Text style={[styles.itemText, { flex: 1 }]}>{item.unit}</Text>
-
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemText}>PCS: ₱{item.pricePCS}</Text>
-                    <Text style={styles.itemText}>BOX: ₱{item.priceBOX}</Text>
-                    <Text style={styles.itemText}>TUB: ₱{item.priceTUB}</Text>
-                  </View>
+                <View style={{alignItems:'flex-end'}}>
+                  <Text style={{fontSize:18, fontWeight:'bold', color: '#2ecc71'}}>Qty: {item.quantity}</Text>
+                  {/* Safe check for prices object */}
+                  <Text style={{fontSize:12}}>PCS: ₱{item.prices?.pcs || 0}</Text>
                 </View>
-              )}
-            />
+              </View>
+            ))}
           </View>
         )}
 
-        {/* REPORTS */}
+        {/* REPORTS VIEW */}
         {page === "reports" && (
-          <View>
-            <Text style={styles.pageTitle}>Reports</Text>
-            <View style={[styles.row, { backgroundColor: "#e6eef5" }]}>
-              <Text style={[styles.itemText, { fontWeight: "700" }]}>Product</Text>
-              <Text style={[styles.itemText, { fontWeight: "700" }]}>Saved At</Text>
-            </View>
-            <FlatList
-              data={reports}
-              keyExtractor={(i) => String(i.id || i.savedAt)}
-              renderItem={({ item }) => (
-                <View style={styles.row}>
-                  <Text>
-                    {item.productName} - {item.quantity} | PCS: ₱{item.pricePCS} | BOX: ₱{item.priceBOX} | TUB: ₱{item.priceTUB}
-                  </Text>
-                  <Text>{item.savedAt.slice(0, 19)}</Text>
-                </View>
-              )}
-            />
-          </View>
+           <View>
+             {reports.map((rep) => (
+               <View key={rep.id} style={styles.row}>
+                 <View>
+                   <Text style={{fontWeight:'bold'}}>{rep.name}</Text>
+                   <Text style={{fontSize:12, color:'#888'}}>{rep.displayDate}</Text>
+                 </View>
+                 <View style={{alignItems:'flex-end'}}>
+                   <Text style={{
+                     fontWeight:'bold', 
+                     color: rep.type === 'RESTOCK' ? 'green' : rep.type === 'SOLD' ? 'red' : 'blue'
+                   }}>
+                     {rep.type}
+                   </Text>
+                   <Text>Qty: {rep.quantity}</Text>
+                 </View>
+               </View>
+             ))}
+           </View>
         )}
 
       </ScrollView>
+
+      {/* FULL SCREEN CAMERA MODAL */}
+      <Modal visible={scanning} animationType="slide">
+        <View style={{flex:1}}>
+          <CameraView
+            style={{ flex: 1 }}
+            onBarcodeScanned={scanLock ? undefined : onScan}
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          />
+          <Button title="Close Camera" onPress={() => setScanning(false)} />
+        </View>
+      </Modal>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  containerCentered: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 20,
-    backgroundColor: "#f0f4f7",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "700",
-    marginBottom: 20,
-    color: "#003366",
-    textAlign: "center",
-  },
-  menu: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 220,
-    backgroundColor: "#f5f5f5",
-    padding: 16,
+  // ... (keep your existing container/input styles if you have them) ...
+  containerCentered: { flex: 1, justifyContent: "center", padding: 20 },
+  input: { borderWidth: 1, borderColor: "#ccc", padding: 10, marginBottom: 10, borderRadius: 5 },
+  title: { fontSize: 24, fontWeight: "bold", textAlign: "center", marginBottom: 20 },
+  
+  // --- UPDATED SIDEBAR STYLES ---
+  menu: { 
+    position: "absolute", 
+    top: 0, 
+    bottom: 0, 
+    width: 220, 
+    backgroundColor: "#E6F2FF", // Light Blue background
+    padding: 20, 
     zIndex: 100,
-    left: -220,
+    elevation: 5, // Adds a subtle shadow on Android
+    shadowColor: "#000", // Shadow for iOS
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
   },
-  menuTitle: { fontWeight: "700", marginBottom: 16, fontSize: 20 },
-  menuItem: { paddingVertical: 12 },
-  menuText: { fontWeight: "600", fontSize: 16 },
-  logoutButton: {
-    backgroundColor: "#e53935",
-    padding: 12,
-    borderRadius: 8,
-    alignItems: "center",
-    marginTop: 16,
+  menuTitle: {
+    color: "#003366", // Dark Blue for contrast
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 20,
   },
-  menuToggle: { position: "absolute", top: 36, left: 16, zIndex: 200 },
-  mainContent: { flex: 1, marginTop: 50 },
-  pageTitle: {
-    fontWeight: "700",
-    fontSize: 22,
-    marginBottom: 16,
-    color: "#003366",
+  menuItem: { 
+    paddingVertical: 15, 
+    borderBottomWidth: 1, 
+    borderBottomColor: "#BDD7EE" // Slightly darker blue divider
   },
-  dashboardText: { fontSize: 16, marginBottom: 8 },
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 1,
-    borderColor: "#ddd",
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    marginBottom: 6,
+  menuText: { 
+    color: "#003366", // Dark Blue text to read clearly on light background
+    fontSize: 18, 
+    fontWeight: "bold" 
   },
-  itemText: { fontSize: 16 },
-  notifContainer: { position: "absolute", top: 50, left: 20, right: 20, zIndex: 999 },
-  notifPanel: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+  logoutButton: { 
+    marginTop: 20, 
+    backgroundColor: 'red', // Kept Red as requested
+    padding: 12, 
+    borderRadius: 5,
+    alignItems: 'center' // Centers the text inside the button
   },
-  notifCloseBtn: {
-    alignSelf: "flex-end",
-    padding: 6,
-    paddingHorizontal: 10,
-    backgroundColor: "#003366",
-    borderRadius: 6,
-    marginBottom: 10,
-  },
-  notifTitle: {
-    fontWeight: "700",
-    fontSize: 18,
-    marginBottom: 10,
-  },
+  // ------------------------------
+
+  header: { flexDirection:'row', justifyContent:'space-between', padding: 15, paddingTop: 40, backgroundColor: 'white', elevation: 2 },
+  card: { backgroundColor:'white', padding: 15, borderRadius: 8, marginBottom: 15, elevation: 2 },
+  row: { flexDirection: "row", justifyContent: "space-between", padding: 15, backgroundColor: "white", marginBottom: 5, borderRadius: 8, elevation: 1 },
 });
