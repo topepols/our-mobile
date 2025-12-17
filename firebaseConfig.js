@@ -1,10 +1,8 @@
-// firebaseConfig.js
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
-// Your exact config from the Electron app
 const firebaseConfig = {
-  apiKey: "AIzaSyDnv01fHrHKPzDWLQCjolEHclIiapBK9vI", // (Note: Keep this safe in production)
+  apiKey: "AIzaSyDnv01fHrHKPzDWLQCjolEHclIiapBK9vI",
   authDomain: "electron-6a45b.firebaseapp.com",
   projectId: "electron-6a45b",
   storageBucket: "electron-6a45b.firebasestorage.app",
@@ -13,5 +11,14 @@ const firebaseConfig = {
   measurementId: "G-0RJH0GK69L"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+/**
+ * For the Desktop/Electron app, we use standard getFirestore.
+ * This ensures the management hub is always fetching fresh data 
+ * from the server, providing the "Source of Truth" for the owner.
+ */
+const db = getFirestore(app);
+
+export { db };
