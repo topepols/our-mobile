@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, Button, Alert, 
   Vibration, Dimensions, ScrollView, Modal, SafeAreaView, 
   TouchableWithoutFeedback,
-  Image // Added for Logo
+  Image 
 } from "react-native";
 
 // --- EXTERNAL ASSETS ---
@@ -11,9 +11,9 @@ import styles, { chartConfig } from "./styles";
 
 // --- FIREBASE & CAMERA ---
 import { db } from "./firebaseConfig";
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, orderBy, serverTimestamp, limit } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from "firebase/firestore";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { BarChart, LineChart } from "react-native-chart-kit";
+import { BarChart } from "react-native-chart-kit";
 
 export default function App() {
   const [page, setPage] = useState("login");
@@ -21,6 +21,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [items, setItems] = useState([]);
   const [reports, setReports] = useState([]);
+  const [reportFilter, setReportFilter] = useState("ALL");
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [scanLock, setScanLock] = useState(false);
@@ -44,29 +45,20 @@ export default function App() {
     return () => { unsubInv(); unsubRep(); };
   }, [permission]);
 
+  // Filtering Logic
+  const filteredReports = reports.filter(rep => {
+    if (reportFilter === "ALL") return true;
+    if (reportFilter === "SOLD") return rep.type === "SOLD" || rep.type === "DEDUCT";
+    if (reportFilter === "RESTOCK") return rep.type === "RESTOCK" || rep.type === "NEW ITEM";
+    return true;
+  });
+
   const getInventoryData = () => {
     const sortedItems = [...items].sort((a, b) => b.quantity - a.quantity);
-    return {
-      labels: sortedItems.map(i => i.name.length > 5 ? i.name.substring(0, 5) + ".." : i.name),
-      datasets: [{ data: sortedItems.map(i => i.quantity) }]
+    return { 
+      labels: sortedItems.map(i => i.name.length > 5 ? i.name.substring(0, 5) + ".." : i.name), 
+      datasets: [{ data: sortedItems.map(i => i.quantity) }] 
     };
-  };
-
-  const getSalesTrendData = () => {
-    const last7Days = [...Array(7)].map((_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      return d.toISOString().split('T')[0];
-    }).reverse();
-    const salesCounts = last7Days.map(date => {
-      return reports.filter(r => r.type === "SOLD" && r.date === date).reduce((sum, r) => sum + r.quantity, 0);
-    });
-    return { labels: last7Days.map(d => d.split('-')[2]), datasets: [{ data: salesCounts }] };
-  };
-
-  const getTodayRevenue = () => {
-    const today = new Date().toISOString().split('T')[0];
-    return reports.filter(r => (r.type === "SOLD" || r.type === "DEDUCT") && r.date === today).reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
   };
 
   const onScan = async ({ data }) => {
@@ -74,12 +66,11 @@ export default function App() {
     setScanLock(true);
     Vibration.vibrate(200);
     let parsed;
-    try { parsed = JSON.parse(data); } 
-    catch { parsed = { name: data, unit: "pcs", prices: { pcs: 0, box: 0, tub: 0 } }; }
+    try { parsed = JSON.parse(data); } catch { parsed = { name: data, unit: "pcs", prices: { pcs: 0, box: 0, tub: 0 } }; }
     const scanName = parsed.name || parsed.productName || data;
     const existingItem = items.find(i => i.name.toLowerCase() === scanName.toLowerCase());
-    if (existingItem) { setScannedItem(existingItem); } 
-    else { setScannedItem({ name: scanName, unit: parsed.unit || "pcs", prices: parsed.prices || { pcs: 0, box: 0, tub: 0 }, quantity: 0, isNew: true }); }
+    if (existingItem) setScannedItem(existingItem);
+    else setScannedItem({ name: scanName, unit: parsed.unit || "pcs", prices: parsed.prices || { pcs: 0, box: 0, tub: 0 }, quantity: 0, isNew: true });
     setAdjustQty(1); setScanning(false); setShowAdjustModal(true);
     setTimeout(() => setScanLock(false), 2000);
   };
@@ -110,53 +101,44 @@ export default function App() {
     else { Alert.alert("Denied", "Invalid credentials"); }
   };
 
-  // --- UPDATED MENU WITH CIRCULAR LOGO ---
   const Menu = () => (
     <View style={[styles.menu, { left: menuOpen ? 0 : -280 }]}>
-      <View style={{ alignItems: 'center', marginBottom: 40, marginTop: 20 }}>
-        {/* LOGO CONTAINER */}
+      <View style={{ alignItems: 'center', marginBottom: 40, marginTop: 40 }}>
         <View style={styles.logoCircle}>
-           <Image 
-            source={{ uri: 'https://scontent.fmnl8-2.fna.fbcdn.net/v/t39.30808-6/469034145_122097488396661705_3581626582363008440_n.jpg?_nc_cat=111&ccb=1-7&_nc_sid=6ee11a&_nc_eui2=AeGr4ll7-wiqcCq1J6vUQ0dqdOVUNpWdzz905VQ2lZ3PPx8z4YYUWJVD2HdC8cCGNlpTN_wZdK7i6ISt8wggNwiD&_nc_ohc=0HqAsUs0QycQ7kNvwHxqYys&_nc_oc=Admx8Fx26yflBbiwcSbdD9aZE7rZJeqq6Kslr-buTeGbxQUobTgkYspXFq-gpVNKQj0&_nc_zt=23&_nc_ht=scontent.fmnl8-2.fna&_nc_gid=Nf7fWLnxxiT1ub3gKgnGmA&oh=00_AflCXEnUYtlPXlOZBPPDvRttVodgOwHi_mf6TEySmc8y4A&oe=69489CF9' }} 
-            style={styles.logoImage} 
-           />
+          {/* UPDATED: Uses local logo.jpg file */}
+          <Image source={require('./logo.jpg')} style={styles.logoImage} />
         </View>
         <Text style={styles.menuTitle}>Double JDG</Text>
         <Text style={styles.menuSubtitle}>Mobile Management</Text>
       </View>
-
       <View style={{ flex: 1 }}>
         {["dashboard", "inventory", "reports"].map((p) => (
-          <TouchableOpacity 
-            key={p} 
-            style={[styles.menuItem, page === p && styles.menuItemActive]} 
-            onPress={() => { setPage(p); setMenuOpen(false); }}
-          >
-            <Text style={[styles.menuText, page === p && styles.menuTextActive]}>
-              {p.toUpperCase()}
-            </Text>
+          <TouchableOpacity key={p} style={[styles.menuItem, page === p && styles.menuItemActive]} onPress={() => { setPage(p); setMenuOpen(false); }}>
+            <Text style={[styles.menuText, page === p && styles.menuTextActive]}>{p.toUpperCase()}</Text>
           </TouchableOpacity>
         ))}
       </View>
-
-      {/* Logout button at the very bottom */}
       <TouchableOpacity style={styles.logoutButton} onPress={() => setPage("login")}>
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
     </View>
   );
 
-  if (page === "login") return (
-    <View style={styles.containerCentered}>
-      <Text style={styles.title}>Welcome Back</Text>
-      <TextInput placeholder="Username" style={styles.input} onChangeText={setUsername} autoCapitalize="none" />
-      <TextInput placeholder="Password" secureTextEntry style={styles.input} onChangeText={setPassword} />
-      <Button title="Sign In" color="#0F172A" onPress={login} />
-    </View>
-  );
+  // --- LOGIC FIX: Check for "login" state before returning main container ---
+  if (page === "login") {
+    return (
+      <View style={styles.containerCentered}>
+        <Text style={styles.title}>Double JDG</Text>
+        <TextInput placeholder="Username" style={styles.input} onChangeText={setUsername} autoCapitalize="none" />
+        <TextInput placeholder="Password" secureTextEntry style={styles.input} onChangeText={setPassword} />
+        <Button title="Sign In" color="#0F172A" onPress={login} />
+      </View>
+    );
+  }
 
-  const totalValue = items.reduce((acc, curr) => acc + (curr.quantity * (curr.prices?.[curr.unit] || 0)), 0);
+  // Calculated values
   const lowStockItems = items.filter(i => i.quantity < 5);
+  const totalValue = items.reduce((acc, curr) => acc + (curr.quantity * (curr.prices?.[curr.unit] || 0)), 0);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -172,57 +154,61 @@ export default function App() {
       <View style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: 16 }}>
           {page === "dashboard" && (
-            <View>
-              <View style={[styles.card, { backgroundColor: '#F0F9FF', borderColor: '#BAE6FD', borderWidth: 1 }]}>
-                <Text style={[styles.cardLabel, { color: '#0369A1' }]}>Today's Sales Revenue</Text>
-                <Text style={[styles.cardVal, { fontSize: 28, color: '#0369A1' }]}>₱{getTodayRevenue().toLocaleString()}</Text>
-              </View>
-
-              <View style={styles.card}>
-                <Text style={[styles.cardLabel, { marginBottom: 12 }]}>Recent Activity</Text>
-                {reports.slice(0, 5).map((rep) => (
-                  <View key={rep.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '700', fontSize: 13, color: '#1E293B' }} numberOfLines={1}>{rep.name}</Text>
-                      <Text style={{ fontSize: 11, color: '#94A3B8' }}>{rep.displayDate.split(',')[1] || rep.displayDate}</Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '800', color: (rep.type === 'RESTOCK' || rep.type === 'NEW ITEM') ? '#10B981' : '#EF4444' }}>
-                        {rep.type === 'RESTOCK' ? '+' : '-'}{rep.quantity}
-                      </Text>
-                      <Text style={{ fontSize: 10, color: '#64748B' }}>{rep.type}</Text>
-                    </View>
+              <View>
+                {/* ALIGNED TOTALS SECTION */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <View style={[styles.card, { flex: 1, marginRight: 8, marginBottom: 0 }]}>
+                    <Text style={styles.cardLabel}>Inventory Value</Text>
+                    <Text style={[styles.cardVal, { fontSize: 20, color: '#0369A1' }]}>
+                      ₱{totalValue.toLocaleString()}
+                    </Text>
                   </View>
-                ))}
-              </View>
 
-              <View style={styles.card}>
-                <Text style={styles.cardLabel}>Stock Levels</Text>
-                <ScrollView horizontal={true} showsHorizontalScrollIndicator={false}>
-                  <BarChart
-                    data={getInventoryData()}
-                    width={Math.max(Dimensions.get("window").width - 64, items.length * 80)}
-                    height={240}
-                    chartConfig={{ ...chartConfig, fillShadowGradient: "#7DB8F1", fillShadowGradientOpacity: 1 }}
-                    style={{ borderRadius: 16, marginTop: 10 }}
-                    fromZero showValuesOnTopOfBars withInnerLines={false} verticalLabelRotation={30}
-                  />
-                </ScrollView>
-              </View>
+                  <View style={[styles.card, { flex: 1, marginLeft: 8, marginBottom: 0 }]}>
+                    <Text style={styles.cardLabel}>Total Items</Text>
+                    <Text style={[styles.cardVal, { fontSize: 20, color: '#1E293B' }]}>
+                      {items.length} 
+                    </Text>
+                  </View>
+                </View>
 
-              <View style={styles.card}>
-                <Text style={styles.cardLabel}>Sales Trend (Last 7 Days)</Text>
-                <LineChart
-                  data={getSalesTrendData()}
-                  width={Dimensions.get("window").width - 64}
-                  height={220}
-                  chartConfig={{ ...chartConfig, color: (opacity = 1) => `rgba(239, 68, 68, ${opacity})` }}
-                  bezier style={{ borderRadius: 16, marginTop: 10 }}
-                />
-              </View>
-            </View>
-          )}
+                {/* RECENT ACTIVITY (Previous Recommendation) */}
+                <View style={styles.card}>
+                  <Text style={[styles.cardLabel, { marginBottom: 12 }]}>Recent Activity</Text>
+                  {reports.slice(0, 3).map((rep) => (
+                    <View key={rep.id} style={styles.activityRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.activityName} numberOfLines={1}>{rep.name}</Text>
+                        <Text style={styles.activityDate}>{rep.displayDate.split(',')[1] || rep.displayDate}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: (rep.type === 'RESTOCK' || rep.type === 'NEW ITEM') ? '#10B981' : '#EF4444' }}>
+                          {rep.type === 'RESTOCK' ? '+' : '-'}{rep.quantity}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
 
+                {/* STOCK LEVELS CHART */}
+                <View style={styles.card}>
+                  <Text style={styles.cardLabel}>Stock Levels</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <BarChart
+                      data={getInventoryData()}
+                      width={Math.max(Dimensions.get("window").width - 64, items.length * 80)}
+                      height={240}
+                      chartConfig={{ ...chartConfig, fillShadowGradient: "#7DB8F1", fillShadowGradientOpacity: 1 }}
+                      style={{ borderRadius: 16, marginTop: 10 }}
+                      fromZero
+                      showValuesOnTopOfBars
+                      withInnerLines={false}
+                      verticalLabelRotation={30}
+                    />
+                  </ScrollView>
+                </View>
+              </View>
+            )}
           {page === "inventory" && (
             <View>
               {lowStockItems.length > 0 && (
@@ -248,22 +234,31 @@ export default function App() {
             </View>
           )}
 
-          {page === "reports" && reports.map((rep) => (
-            <View key={rep.id} style={styles.row}>
-              <View><Text style={{fontWeight:'700', color: '#0F172A'}}>{rep.name}</Text><Text style={{fontSize:12, color:'#94A3B8'}}>{rep.displayDate}</Text></View>
-              <View style={{alignItems:'flex-end'}}><Text style={{ fontWeight:'700', color: (rep.type === 'RESTOCK' || rep.type === 'NEW ITEM') ? '#10B981' : (rep.type === 'SOLD' || rep.type === 'DEDUCT') ? '#EF4444' : '#3B82F6' }}>{rep.type}</Text><Text style={{fontSize:13, fontWeight: '600'}}>Qty: {rep.quantity}</Text></View>
+          {page === "reports" && (
+            <View>
+              <View style={{ flexDirection: 'row', marginBottom: 16 }}>
+                {["ALL", "SOLD", "RESTOCK"].map((f) => (
+                  <TouchableOpacity key={f} onPress={() => setReportFilter(f)} style={[styles.filterChip, reportFilter === f && styles.filterChipActive]}>
+                    <Text style={[styles.filterChipText, reportFilter === f && styles.filterChipTextActive]}>{f}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {filteredReports.map((rep) => (
+                <View key={rep.id} style={styles.row}>
+                  <View><Text style={{fontWeight:'700', color: '#0F172A'}}>{rep.name}</Text><Text style={{fontSize:12, color:'#94A3B8'}}>{rep.displayDate}</Text></View>
+                  <View style={{alignItems:'flex-end'}}><Text style={{ fontWeight:'700', color: (rep.type === 'RESTOCK' || rep.type === 'NEW ITEM') ? '#10B981' : (rep.type === 'SOLD' || rep.type === 'DEDUCT') ? '#EF4444' : '#3B82F6' }}>{rep.type}</Text><Text style={{fontSize:13, fontWeight: '600'}}>Qty: {rep.quantity}</Text></View>
+                </View>
+              ))}
             </View>
-          ))}
+          )}
         </ScrollView>
 
-        {page !== "login" && (
-          <TouchableOpacity 
-            style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', width: 65, height: 65, borderRadius: 32.5, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.3 }} 
-            onPress={() => setScanning(true)}
-          >
-            <Text style={{ fontSize: 28 }}>📷</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity 
+          style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', width: 65, height: 65, borderRadius: 32.5, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.3 }} 
+          onPress={() => setScanning(true)}
+        >
+          <Text style={{ fontSize: 28 }}>📷</Text>
+        </TouchableOpacity>
       </View>
 
       <Modal visible={showAdjustModal} transparent animationType="fade">

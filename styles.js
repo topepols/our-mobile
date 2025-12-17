@@ -5,12 +5,12 @@ export const chartConfig = {
   backgroundGradientFrom: "#ffffff",
   backgroundGradientTo: "#ffffff",
   decimalPlaces: 0,
-  // This matches the soft blue and slate grey text in your images
+  // Matches the soft blue branding and slate grey text
   color: (opacity = 1) => `rgba(3, 105, 161, ${opacity})`, 
   labelColor: (opacity = 1) => `rgba(100, 116, 139, ${opacity})`,
-  barPercentage: 0.6, // Makes bars slightly thinner and more professional
+  barPercentage: 0.6, 
   propsForBackgroundLines: {
-    strokeWidth: 0, // Removes background grid lines for that clean look
+    strokeWidth: 0, // Clean look without grid lines
   },
   propsForLabels: {
     fontSize: 10,
@@ -20,63 +20,6 @@ export const chartConfig = {
 
 export default StyleSheet.create({
   // Layout & Global
-  // Add or Update these in your styles.js
-menu: { 
-  position: "absolute", 
-  top: 0, bottom: 0, 
-  width: 280, 
-  backgroundColor: "#F8FAFC", 
-  paddingHorizontal: 20, 
-  paddingVertical: 40, 
-  zIndex: 100, 
-  elevation: 10,
-},
-logoCircle: {
-  width: 100,
-  height: 100,
-  borderRadius: 50, // This makes the square image a circle
-  backgroundColor: '#fff',
-  justifyContent: 'center',
-  alignItems: 'center',
-  borderWidth: 3,
-  borderColor: '#0369A1', // Branding Blue
-  overflow: 'hidden', // Clips the image to the circle
-  elevation: 5,
-  shadowColor: '#000',
-  shadowOpacity: 0.1,
-  shadowRadius: 10,
-  marginBottom: 15,
-},
-logoImage: {
-  width: '100%',
-  height: '100%',
-  resizeMode: 'cover', // Ensures the logo fills the circle
-},
-menuTitle: {
-  color: '#0F172A',
-  fontSize: 24,
-  fontWeight: "900",
-  letterSpacing: -0.5,
-},
-menuSubtitle: {
-  color: "#64748B",
-  fontSize: 13,
-  fontWeight: "600",
-  marginTop: 2,
-},
-menuItem: { 
-  paddingVertical: 14, 
-  paddingHorizontal: 16,
-  borderRadius: 12,
-  marginBottom: 10,
-},
-menuItemActive: {
-  backgroundColor: "#E0F2FE", // Soft blue highlight like the reference
-},
-menuTextActive: {
-  color: "#0369A1",
-  fontWeight: "800",
-},
   safeArea: { flex: 1, backgroundColor: "#F8FAFC" },
   containerCentered: { flex: 1, justifyContent: "center", padding: 24, backgroundColor: "#F8FAFC" },
   header: { 
@@ -107,22 +50,52 @@ menuTextActive: {
     fontSize: 16 
   },
 
-  // Sidebar Menu
+  // Sidebar Menu (Matched to photo reference)
   menu: { 
     position: "absolute", 
     top: 0, bottom: 0, 
     width: 280, 
     backgroundColor: "#F8FAFC", 
     paddingHorizontal: 20, 
-    paddingVertical: 60, 
+    paddingVertical: 40, 
     zIndex: 100, 
     elevation: 10,
     shadowColor: "#000",
     shadowOpacity: 0.15,
     shadowRadius: 10,
   },
-  menuTitle: { color: "#0F172A", fontSize: 24, fontWeight: "800", marginBottom: 4 },
-  menuSubtitle: { color: "#64748B", fontSize: 14, marginBottom: 30 },
+  logoCircle: {
+    width: 110,
+    height: 110,
+    borderRadius: 55, 
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#003366', // Deep blue border
+    overflow: 'hidden',
+    elevation: 5,
+    marginBottom: 15,
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  menuTitle: { 
+    color: '#0F172A', 
+    fontSize: 26, 
+    fontWeight: "900", 
+    letterSpacing: -0.5,
+    textAlign: 'center' 
+  },
+  menuSubtitle: { 
+    color: "#64748B", 
+    fontSize: 13, 
+    fontWeight: "600", 
+    marginTop: 2,
+    textAlign: 'center'
+  },
   menuItem: { 
     flexDirection: 'row',
     alignItems: 'center',
@@ -132,8 +105,8 @@ menuTextActive: {
     marginBottom: 8,
   },
   menuItemActive: { backgroundColor: "#E0F2FE" },
-  menuText: { color: "#475569", fontSize: 16, fontWeight: "600" },
-  menuTextActive: { color: "#0369A1" },
+  menuText: { color: "#475569", fontSize: 16, fontWeight: "700" },
+  menuTextActive: { color: "#0369A1", fontWeight: "800" },
 
   // Buttons
   scanBtn: { 
@@ -160,11 +133,12 @@ menuTextActive: {
     borderRadius: 12, 
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#FCA5A5'
+    borderColor: '#FCA5A5',
+    marginBottom: 20
   },
   logoutText: { color: "#991B1B", fontWeight: "700", fontSize: 16 },
 
-  // Cards & Rows
+  // Cards & Dashboard
   card: { 
     backgroundColor: 'white', 
     padding: 20, 
@@ -175,8 +149,44 @@ menuTextActive: {
     shadowOpacity: 0.05, 
     shadowRadius: 8 
   },
-  cardLabel: { fontSize: 15, marginBottom: 6, color: '#64748B' },
+  cardLabel: { fontSize: 15, marginBottom: 6, color: '#64748B', fontWeight: '600' },
   cardVal: { fontWeight: '700', color: '#0F172A', fontSize: 18 },
+  
+  // Recent Activity Feed
+  activityRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    paddingVertical: 10, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#F1F5F9' 
+  },
+  activityName: { fontWeight: '700', fontSize: 14, color: '#1E293B' },
+  activityDate: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
+
+  // Report Filter Chips
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterChipActive: {
+    backgroundColor: '#0369A1', 
+    borderColor: '#0369A1',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  filterChipTextActive: {
+    color: 'white',
+  },
+
+  // List Rows
   row: { 
     flexDirection: "row", 
     justifyContent: "space-between", 
@@ -191,6 +201,4 @@ menuTextActive: {
 
   // Camera
   cameraOverlay: { position: 'absolute', bottom: 50, left: 0, right: 0, alignItems: 'center' }
-  
 });
-
