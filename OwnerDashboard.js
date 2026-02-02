@@ -97,7 +97,6 @@ export default function OwnerDashboard({ user, onLogout }) {
         await updateDoc(doc(db, "inventory", req.itemId), { quantity: increment(-req.quantity) });
         await updateDoc(doc(db, "requests", req.id), { status: "APPROVED" });
         
-        // Notify Employee
         notifyEmployee(req.requestorUsername, "Request Approved ✅", `Your request for ${req.itemName} has been approved.`);
 
         Alert.alert("Success", "Request Approved");
@@ -108,14 +107,12 @@ export default function OwnerDashboard({ user, onLogout }) {
     try {
         await updateDoc(doc(db, "requests", req.id), { status: "DECLINED" });
         
-        // Notify Employee
         notifyEmployee(req.requestorUsername, "Request Declined ❌", `Your request for ${req.itemName} was declined.`);
 
         Alert.alert("Declined", "Request has been declined.");
     } catch (e) { Alert.alert("Error", e.message); }
   };
 
-  // ... (Rest of Merge Logic & Render is same as before, no changes needed below this line) ...
   // --- MERGE LOGIC ---
   useEffect(() => {
     const reportLogs = rawReports.map(r => ({
@@ -141,6 +138,7 @@ export default function OwnerDashboard({ user, onLogout }) {
   }, [rawReports, rawRequests, items]);
 
   const openCheckModal = (item) => { setScannedItem(item); setAdjustQty(1); setShowAdjustModal(true); };
+  
   const handleBarCodeScanned = ({ data }) => {
     if (scanLock) return; setScanLock(true); Vibration.vibrate(200); setScanning(false);
     let searchName = data; try { const parsed = JSON.parse(data); if(parsed.name) searchName = parsed.name; } catch(e) {} 
@@ -261,8 +259,23 @@ export default function OwnerDashboard({ user, onLogout }) {
 
         {viewMode === 'inventory' && (
             <View>
-                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>Tap item (or scan) to Check/Adjust Stock</Text>
-                {items.map(item => ( <TouchableOpacity key={item.id} style={styles.row} onPress={() => openCheckModal(item)}><View style={{ flex: 1 }}><Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0F172A' }}>{item.name}</Text><Text style={{ color: '#64748B' }}>In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text></Text></View><View style={{ backgroundColor: '#F1F5F9', padding: 8, borderRadius: 8 }}><Text style={{ fontSize: 12, fontWeight: 'bold', color: '#475569' }}>Check</Text></View></TouchableOpacity> ))}
+                {/* --- UPDATE: Instruction text changed --- */}
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>
+                    Scan QR code to Check/Adjust Stock
+                </Text>
+
+                {/* --- UPDATE: List is now Read-Only (View instead of TouchableOpacity) --- */}
+                {items.map(item => ( 
+                    <View key={item.id} style={styles.row}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0F172A' }}>{item.name}</Text>
+                            <Text style={{ color: '#64748B' }}>
+                                In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text>
+                            </Text>
+                        </View>
+                        {/* --- UPDATE: Removed the "Check" button --- */}
+                    </View> 
+                ))}
             </View>
         )}
 
@@ -288,9 +301,50 @@ export default function OwnerDashboard({ user, onLogout }) {
         )}
       </ScrollView>
 
-      <TouchableOpacity style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', width: 65, height: 65, borderRadius: 35, justifyContent: 'center', alignItems: 'center', elevation: 10 }} onPress={() => setScanning(true)}><Text style={{ fontSize: 30 }}>📷</Text></TouchableOpacity>
-      <Modal visible={showAdjustModal} transparent animationType="fade"><View style={styles.backdrop}><View style={[styles.card, { width: '85%', padding: 25 }]}><Text style={[styles.menuTitle, { marginBottom: 5 }]}>Inventory Check</Text><Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 20 }}>Adjusting: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{scannedItem?.name}</Text></Text><View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 30 }}><TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#64748B' }]} onPress={() => setAdjustQty(Math.max(1, adjustQty - 1))}><Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>−</Text></TouchableOpacity><Text style={{ fontSize: 32, fontWeight: 'bold', marginHorizontal: 30 }}>{adjustQty}</Text><TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#10B981' }]} onPress={() => setAdjustQty(adjustQty + 1)}><Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>+</Text></TouchableOpacity></View><View style={{ flexDirection: 'row', gap: 15, marginBottom: 15 }}><TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#EF4444', marginBottom: 0 }]} onPress={() => confirmAdjust("SOLD")}><Text style={{ color: 'white', fontWeight: 'bold' }}>REMOVE (Sold)</Text></TouchableOpacity><TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#0369A1', marginBottom: 0 }]} onPress={() => confirmAdjust("RESTOCK")}><Text style={{ color: 'white', fontWeight: 'bold' }}>ADD (Restock)</Text></TouchableOpacity></View><Button title="Close" color="#64748B" onPress={() => setShowAdjustModal(false)} /></View></View></Modal>
-      <Modal visible={scanning} animationType="slide"><View style={{ flex: 1, backgroundColor: 'black' }}><CameraView style={{ flex: 1 }} onBarcodeScanned={scanLock ? undefined : handleBarCodeScanned} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} /><SafeAreaView style={styles.cameraOverlay}><Button title="Close Scanner" color="white" onPress={() => setScanning(false)} /></SafeAreaView></View></Modal>
+      {/* --- UPDATE: Camera Button is the only floating action --- */}
+      <TouchableOpacity style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', width: 65, height: 65, borderRadius: 35, justifyContent: 'center', alignItems: 'center', elevation: 10 }} onPress={() => setScanning(true)}>
+          <Text style={{ fontSize: 30 }}>📷</Text>
+      </TouchableOpacity>
+      
+      <Modal visible={showAdjustModal} transparent animationType="fade">
+          <View style={styles.backdrop}>
+              <View style={[styles.card, { width: '85%', padding: 25 }]}>
+                  <Text style={[styles.menuTitle, { marginBottom: 5 }]}>Inventory Check</Text>
+                  <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 20 }}>Adjusting: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{scannedItem?.name}</Text></Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 30 }}>
+                      <TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#64748B' }]} onPress={() => setAdjustQty(Math.max(1, adjustQty - 1))}>
+                          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>−</Text>
+                      </TouchableOpacity>
+                      <Text style={{ fontSize: 32, fontWeight: 'bold', marginHorizontal: 30 }}>{adjustQty}</Text>
+                      <TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#10B981' }]} onPress={() => setAdjustQty(adjustQty + 1)}>
+                          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>+</Text>
+                      </TouchableOpacity>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 15, marginBottom: 15 }}>
+                      <TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#EF4444', marginBottom: 0 }]} onPress={() => confirmAdjust("SOLD")}>
+                          <Text style={{ color: 'white', fontWeight: 'bold' }}>REMOVE (Sold)</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#0369A1', marginBottom: 0 }]} onPress={() => confirmAdjust("RESTOCK")}>
+                          <Text style={{ color: 'white', fontWeight: 'bold' }}>ADD (Restock)</Text>
+                      </TouchableOpacity>
+                  </View>
+                  <Button title="Close" color="#64748B" onPress={() => setShowAdjustModal(false)} />
+              </View>
+          </View>
+      </Modal>
+
+      <Modal visible={scanning} animationType="slide">
+          <View style={{ flex: 1, backgroundColor: 'black' }}>
+              <CameraView 
+                style={{ flex: 1 }} 
+                onBarcodeScanned={scanLock ? undefined : handleBarCodeScanned} 
+                barcodeScannerSettings={{ barcodeTypes: ["qr"] }} 
+              />
+              <SafeAreaView style={styles.cameraOverlay}>
+                  <Button title="Close Scanner" color="white" onPress={() => setScanning(false)} />
+              </SafeAreaView>
+          </View>
+      </Modal>
     </SafeAreaView>
   );
 }
