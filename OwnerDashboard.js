@@ -166,21 +166,58 @@ export default function OwnerDashboard({ user, onLogout }) {
   };
 
   const totalStockCount = items.reduce((acc, i) => acc + i.quantity, 0);
-  const lowStock = items.filter(i => (i.unit === 'box' ? i.quantity <= 5 : i.quantity <= 10));
+  
+  // Excludes Equipment for low stock alerts
+  const lowStock = items.filter(i => 
+    i.type !== 'EQUIPMENT' && 
+    (i.unit === 'box' ? i.quantity <= 5 : i.quantity <= 10)
+  );
+
+  // --- HELPER: RENDER LIST BASED ON TYPE ---
+  const renderInventoryList = (filterType) => {
+    // 'CONSUMABLE' maps to 'materials' view logic
+    const filteredItems = items.filter(item => {
+        const type = item.type || 'CONSUMABLE';
+        return type === filterType;
+    });
+
+    if (filteredItems.length === 0) {
+        return <Text style={{textAlign:'center', color:'#94a3b8', marginTop: 20}}>No items found.</Text>;
+    }
+
+    return filteredItems.map(item => ( 
+        <View key={item.id} style={styles.row}>
+            <View style={{ flex: 1 }}>
+                <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0F172A' }}>{item.name}</Text>
+                <Text style={{ color: '#64748B' }}>
+                    In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text>
+                </Text>
+            </View>
+        </View> 
+    ));
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A' }}>OWNER PANEL</Text>
+        <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A' }}>
+            {viewMode === 'dashboard' ? 'OWNER PANEL' :
+             viewMode === 'materials' ? 'MATERIALS' :
+             viewMode === 'equipment' ? 'EQUIPMENT' :
+             viewMode === 'approvals' ? 'APPROVALS' : 'REPORTS'}
+        </Text>
         <TouchableOpacity onPress={onLogout}><Text style={{ color: '#EF4444', fontWeight: 'bold' }}>Logout</Text></TouchableOpacity>
       </View>
 
+      {/* --- UPDATED TAB NAVIGATION (Scrollable if needed, or compact) --- */}
       <View style={{ flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#E2E8F0' }}>
-          {['dashboard', 'approvals', 'inventory', 'reports'].map(tab => (
-              <TouchableOpacity key={tab} onPress={() => setViewMode(tab)} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode === tab ? '#0F172A' : 'transparent' }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 10, color: viewMode === tab ? '#0F172A' : '#94A3B8' }}>{tab.toUpperCase()}</Text>
-              </TouchableOpacity>
-          ))}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
+            {['dashboard', 'approvals', 'materials', 'equipment', 'reports'].map(tab => (
+                <TouchableOpacity key={tab} onPress={() => setViewMode(tab)} style={{ paddingHorizontal: 15, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode === tab ? '#0F172A' : 'transparent' }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 11, color: viewMode === tab ? '#0F172A' : '#94A3B8' }}>{tab.toUpperCase()}</Text>
+                </TouchableOpacity>
+            ))}
+          </ScrollView>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
@@ -257,25 +294,23 @@ export default function OwnerDashboard({ user, onLogout }) {
             </View>
         )}
 
-        {viewMode === 'inventory' && (
+        {/* --- MATERIALS VIEW (Formerly Consumables) --- */}
+        {viewMode === 'materials' && (
             <View>
-                {/* --- UPDATE: Instruction text changed --- */}
                 <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>
-                    Scan QR code to Check/Adjust Stock
+                    Scan QR to Adjust Materials
                 </Text>
+                {renderInventoryList('CONSUMABLE')}
+            </View>
+        )}
 
-                {/* --- UPDATE: List is now Read-Only (View instead of TouchableOpacity) --- */}
-                {items.map(item => ( 
-                    <View key={item.id} style={styles.row}>
-                        <View style={{ flex: 1 }}>
-                            <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0F172A' }}>{item.name}</Text>
-                            <Text style={{ color: '#64748B' }}>
-                                In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text>
-                            </Text>
-                        </View>
-                        {/* --- UPDATE: Removed the "Check" button --- */}
-                    </View> 
-                ))}
+        {/* --- EQUIPMENT VIEW --- */}
+        {viewMode === 'equipment' && (
+            <View>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>
+                    Scan QR to Adjust Equipment
+                </Text>
+                {renderInventoryList('EQUIPMENT')}
             </View>
         )}
 
@@ -301,7 +336,7 @@ export default function OwnerDashboard({ user, onLogout }) {
         )}
       </ScrollView>
 
-      {/* --- UPDATE: Camera Button is the only floating action --- */}
+      {/* CAMERA BUTTON */}
       <TouchableOpacity style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', width: 65, height: 65, borderRadius: 35, justifyContent: 'center', alignItems: 'center', elevation: 10 }} onPress={() => setScanning(true)}>
           <Text style={{ fontSize: 30 }}>📷</Text>
       </TouchableOpacity>

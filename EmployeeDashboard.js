@@ -25,8 +25,8 @@ export default function EmployeeDashboard({ user, onLogout }) {
   const [returnModalVisible, setReturnModalVisible] = useState(false);
   const [selectedReturnItem, setSelectedReturnItem] = useState(null);
 
+  // Updated Default View
   const [viewMode, setViewMode] = useState("dashboard");
-  const [sortMode, setSortMode] = useState("newest");
 
   useEffect(() => {
     // 1. Notification Registration
@@ -53,31 +53,28 @@ export default function EmployeeDashboard({ user, onLogout }) {
     return () => { unsubInv(); unsubReq(); };
   }, []);
 
-  // --- NEW: QUANTITY HANDLER ---
+  // --- QUANTITY HANDLER ---
   const updateQuantity = (item, change) => {
     setCart(prev => {
         const next = { ...prev };
         const currentQty = next[item.id] ? next[item.id].qty : 0;
         const newQty = currentQty + change;
 
-        // Validation: Don't go below 0
         if (newQty <= 0) {
             delete next[item.id];
             return next;
         }
 
-        // Validation: Don't exceed stock
         if (newQty > item.quantity) {
             Alert.alert("Limit Reached", `Only ${item.quantity} available.`);
             return prev; 
         }
 
-        // Update Cart
         next[item.id] = { 
             ...item, 
             qty: newQty, 
             unit: item.unit || 'pcs', 
-            type: item.type || 'CONSUMABLE' 
+            type: item.type || 'materials' 
         };
         return next;
     });
@@ -91,7 +88,7 @@ export default function EmployeeDashboard({ user, onLogout }) {
         await Promise.all(ids.map(id => addDoc(collection(db, "requests"), {
             itemId: id, 
             itemName: cart[id].name, 
-            type: cart[id].type || 'CONSUMABLE',
+            type: cart[id].type || 'materials',
             quantity: cart[id].qty, 
             unit: cart[id].unit,
             requestorName: user.name, 
@@ -100,7 +97,6 @@ export default function EmployeeDashboard({ user, onLogout }) {
             timestamp: serverTimestamp()
         })));
 
-        // Notify Owner
         if (sendPushNotification) {
             const q = query(collection(db, "accounts"), where("role", "==", "owner"));
             const snaps = await getDocs(q);
@@ -138,27 +134,84 @@ export default function EmployeeDashboard({ user, onLogout }) {
 
   const sortedRequests = [...myRequests].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
+  // --- NEW HELPER: Render Items based on category ---
+  const renderInventoryList = (filterType) => {
+      // Filter logic: 'EQUIPMENT' matches perfectly, 'materials' matches 'materials' OR undefined/null
+      const filteredItems = items.filter(item => {
+          const type = item.type || 'materials';
+          return type === filterType;
+      });
+
+      if (filteredItems.length === 0) {
+          return <Text style={{textAlign:'center', color:'#94a3b8', marginTop: 20}}>No items found in this category.</Text>;
+      }
+
+      return filteredItems.map(item => {
+        const qtyInCart = cart[item.id] ? cart[item.id].qty : 0;
+        return (
+            <View key={item.id} style={[styles.row, qtyInCart > 0 && { backgroundColor: '#F0F9FF', borderColor: '#38BDF8', borderWidth: 1 }]}>
+                <View style={{ flex: 1 }}>
+                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.type === 'EQUIPMENT' ? '🔧 ' : '🔩 '} {item.name}</Text>
+                    <Text style={{ color: '#64748B' }}>Stock: {item.quantity} {item.unit}</Text>
+                </View>
+                
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    {qtyInCart > 0 ? (
+                        <>
+                            <TouchableOpacity onPress={() => updateQuantity(item, -1)} style={{ width: 35, height: 35, borderRadius: 18, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={{ fontWeight: 'bold', fontSize: 18, minWidth: 20, textAlign: 'center' }}>{qtyInCart}</Text>
+                            <TouchableOpacity onPress={() => updateQuantity(item, 1)} style={{ width: 35, height: 35, borderRadius: 18, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>+</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        <TouchableOpacity onPress={() => updateQuantity(item, 1)} style={{ backgroundColor: '#0F172A', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 }}>
+                            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>+ ADD</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </View>
+        );
+      });
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F172A' }}>{viewMode === 'dashboard' ? 'MY PROFILE' : 'BORROW ITEMS'}</Text>
+        <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F172A' }}>
+             {viewMode === 'dashboard' ? 'MY PROFILE' : 
+              viewMode === 'materials' ? 'materials' : 'EQUIPMENT'}
+        </Text>
         <TouchableOpacity onPress={onLogout}><Text style={{ color: '#EF4444', fontWeight: 'bold' }}>Logout</Text></TouchableOpacity>
       </View>
 
-      <View style={{ flexDirection: 'row', padding: 10, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' }}>
-        <TouchableOpacity onPress={() => setViewMode('dashboard')} style={{ flex: 1, padding: 10, alignItems: 'center', borderBottomWidth: 2, borderColor: viewMode==='dashboard'?'#0F172A':'transparent' }}><Text style={{ fontWeight: 'bold', color: viewMode==='dashboard'?'#0F172A':'#64748B' }}>Dashboard</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => setViewMode('inventory')} style={{ flex: 1, padding: 10, alignItems: 'center', borderBottomWidth: 2, borderColor: viewMode==='inventory'?'#0F172A':'transparent' }}><Text style={{ fontWeight: 'bold', color: viewMode==='inventory'?'#0F172A':'#64748B' }}>Inventory</Text></TouchableOpacity>
+      {/* --- UPDATED NAVIGATION BAR (3 TABS) --- */}
+      <View style={{ flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' }}>
+        <TouchableOpacity onPress={() => setViewMode('dashboard')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='dashboard'?'#0F172A':'transparent' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='dashboard'?'#0F172A':'#94A3B8' }}>DASHBOARD</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setViewMode('materials')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='materials'?'#0F172A':'transparent' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='materials'?'#0F172A':'#94A3B8' }}>MATERIALS</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setViewMode('equipment')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='equipment'?'#0F172A':'transparent' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='equipment'?'#0F172A':'#94A3B8' }}>EQUIPMENT</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
-        {viewMode === 'dashboard' ? (
+        
+        {/* --- VIEW 1: DASHBOARD (HISTORY) --- */}
+        {viewMode === 'dashboard' && (
             <View>
                 <View style={[styles.card, { alignItems: 'center', padding: 20 }]}>
                     <Image source={{ uri: user.imageUri || 'https://via.placeholder.com/100' }} style={{ width: 100, height: 100, borderRadius: 50, marginBottom: 10, backgroundColor: '#ccc' }} />
                     <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#0F172A' }}>{user.name}</Text>
                     <Text style={{ color: '#64748B' }}>{user.position}</Text>
                 </View>
-                <Text style={{ fontSize: 16, fontWeight: 'bold', marginVertical: 15, color: '#334155' }}>History</Text>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', marginVertical: 15, color: '#334155' }}>Recent History</Text>
+                {sortedRequests.length === 0 && <Text style={{color:'#94a3b8', fontStyle:'italic'}}>No requests yet.</Text>}
                 {sortedRequests.map(r => (
                     <View key={r.id} style={styles.row}>
                         <View style={{flex: 1}}>
@@ -175,44 +228,28 @@ export default function EmployeeDashboard({ user, onLogout }) {
                     </View>
                 ))}
             </View>
-        ) : (
+        )}
+
+        {/* --- VIEW 2: materials --- */}
+        {viewMode === 'materials' && (
             <View>
-                
-                {items.map(item => {
-                    const qtyInCart = cart[item.id] ? cart[item.id].qty : 0;
-                    return (
-                        <View key={item.id} style={[styles.row, qtyInCart > 0 && { backgroundColor: '#F0F9FF', borderColor: '#38BDF8', borderWidth: 1 }]}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{item.type === 'EQUIPMENT' ? '🔧 ' : '🔩 '} {item.name}</Text>
-                                <Text style={{ color: '#64748B' }}>Stock: {item.quantity} {item.unit}</Text>
-                            </View>
-                            
-                            {/* NEW +/- CONTROLS */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                {qtyInCart > 0 ? (
-                                    <>
-                                        <TouchableOpacity onPress={() => updateQuantity(item, -1)} style={{ width: 35, height: 35, borderRadius: 18, backgroundColor: '#EF4444', justifyContent: 'center', alignItems: 'center' }}>
-                                            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>-</Text>
-                                        </TouchableOpacity>
-                                        <Text style={{ fontWeight: 'bold', fontSize: 18, minWidth: 20, textAlign: 'center' }}>{qtyInCart}</Text>
-                                        <TouchableOpacity onPress={() => updateQuantity(item, 1)} style={{ width: 35, height: 35, borderRadius: 18, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' }}>
-                                            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 20 }}>+</Text>
-                                        </TouchableOpacity>
-                                    </>
-                                ) : (
-                                    <TouchableOpacity onPress={() => updateQuantity(item, 1)} style={{ backgroundColor: '#0F172A', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 }}>
-                                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>+ ADD</Text>
-                                    </TouchableOpacity>
-                                )}
-                            </View>
-                        </View>
-                    );
-                })}
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}></Text>
+                {renderInventoryList('CONSUMABLE')}
             </View>
         )}
+
+        {/* --- VIEW 3: EQUIPMENT --- */}
+        {viewMode === 'equipment' && (
+            <View>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}></Text>
+                {renderInventoryList('EQUIPMENT')}
+            </View>
+        )}
+
       </ScrollView>
 
-      {viewMode === 'inventory' && Object.keys(cart).length > 0 && (
+      {/* FLOAT CART BUTTON (Only shows if cart has items) */}
+      {(viewMode === 'materials' || viewMode === 'equipment') && Object.keys(cart).length > 0 && (
         <TouchableOpacity style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', paddingVertical: 15, paddingHorizontal: 25, borderRadius: 30, elevation: 5 }} onPress={() => setShowCart(true)}>
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Review ({Object.keys(cart).length}) ➔</Text>
         </TouchableOpacity>
@@ -226,7 +263,10 @@ export default function EmployeeDashboard({ user, onLogout }) {
                 <ScrollView style={{ marginBottom: 20 }}>
                     {Object.values(cart).map(i => ( 
                         <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderColor: '#f1f5f9' }}>
-                            <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{i.name}</Text>
+                            <View>
+                                <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{i.name}</Text>
+                                <Text style={{ fontSize: 12, color: '#64748B' }}>{i.type}</Text>
+                            </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                 <TouchableOpacity onPress={() => updateQuantity(i, -1)} style={{ padding: 5, backgroundColor: '#eee', borderRadius: 5 }}><Text style={{fontWeight:'bold'}}>-</Text></TouchableOpacity>
                                 <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{i.qty} {i.unit}</Text>
