@@ -10,7 +10,13 @@ import { db } from "./firebaseConfig";
 import styles from "./styles"; 
 
 // IMPORT NOTIFICATION HELPERS
-import { registerForPushNotificationsAsync, sendPushNotification } from "./notifications";
+// (Ensure you have a notifications.js file or remove these lines if unused)
+let registerForPushNotificationsAsync, sendPushNotification;
+try {
+  const notif = require("./notifications");
+  registerForPushNotificationsAsync = notif.registerForPushNotificationsAsync;
+  sendPushNotification = notif.sendPushNotification;
+} catch (e) { console.log("Notification module missing"); }
 
 export default function OwnerDashboard({ user, onLogout }) {
   const [viewMode, setViewMode] = useState("dashboard"); 
@@ -24,6 +30,8 @@ export default function OwnerDashboard({ user, onLogout }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [scanLock, setScanLock] = useState(false);
+  
+  // Modal State
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [scannedItem, setScannedItem] = useState(null);
   const [adjustQty, setAdjustQty] = useState(1);
@@ -31,34 +39,36 @@ export default function OwnerDashboard({ user, onLogout }) {
   useEffect(() => {
     if (!permission) requestPermission();
 
-    // 1. REGISTER NOTIFICATIONS (For Owner)
-    registerForPushNotificationsAsync().then(async (token) => {
-        if (token) {
-            const q = query(collection(db, "accounts"), where("username", "==", user.username));
-            const snapshot = await getDocs(q);
-            snapshot.forEach(async (d) => {
-                await updateDoc(doc(db, "accounts", d.id), { pushToken: token });
-            });
-        }
-    });
+    // 1. REGISTER NOTIFICATIONS
+    if (registerForPushNotificationsAsync) {
+        registerForPushNotificationsAsync().then(async (token) => {
+            if (token) {
+                const q = query(collection(db, "accounts"), where("username", "==", user.username));
+                const snapshot = await getDocs(q);
+                snapshot.forEach(async (d) => {
+                    await updateDoc(doc(db, "accounts", d.id), { pushToken: token });
+                });
+            }
+        });
+    }
 
-    // 2. Inventory
+    // 2. Inventory Listener
     const unsubInv = onSnapshot(query(collection(db, "inventory"), orderBy("name")), (snap) => {
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
 
-    // 3. Reports
+    // 3. Reports Listener
     const unsubRep = onSnapshot(query(collection(db, "reports"), orderBy("timestamp", "desc")), (snap) => {
       setRawReports(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
 
-    // 4. History (Approved/Returned)
+    // 4. History Listener
     const qHist = query(collection(db, "requests"), where("status", "in", ["APPROVED", "RETURNED"]), orderBy("timestamp", "desc"));
     const unsubHist = onSnapshot(qHist, (snap) => {
       setRawRequests(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
 
-    // 5. PENDING REQUESTS
+    // 5. Pending Requests Listener
     const qPend = query(collection(db, "requests"), where("status", "==", "PENDING"));
     const unsubPend = onSnapshot(qPend, (snap) => {
       const data = snap.docs.map(d => ({ 
@@ -74,31 +84,27 @@ export default function OwnerDashboard({ user, onLogout }) {
     return () => { unsubInv(); unsubRep(); unsubHist(); unsubPend(); };
   }, []);
 
-  // --- HELPER: NOTIFY EMPLOYEE ---
+  // --- NOTIFICATION HELPER ---
   const notifyEmployee = async (username, title, body) => {
+      if (!sendPushNotification) return;
       const q = query(collection(db, "accounts"), where("username", "==", username));
       const snaps = await getDocs(q);
       snaps.forEach(doc => {
           const data = doc.data();
-          if (data.pushToken) {
-              sendPushNotification(data.pushToken, title, body);
-          }
+          if (data.pushToken) sendPushNotification(data.pushToken, title, body);
       });
   };
 
-  // --- APPROVAL LOGIC ---
+  // --- ACTIONS ---
   const handleApprove = async (req) => {
     const item = items.find(i => i.id === req.itemId);
-    
     if (!item) { Alert.alert("Error", "Item not found."); return; }
     if (item.quantity < req.quantity) { Alert.alert("Error", `Not enough stock.`); return; }
 
     try {
         await updateDoc(doc(db, "inventory", req.itemId), { quantity: increment(-req.quantity) });
         await updateDoc(doc(db, "requests", req.id), { status: "APPROVED" });
-        
         notifyEmployee(req.requestorUsername, "Request Approved ✅", `Your request for ${req.itemName} has been approved.`);
-
         Alert.alert("Success", "Request Approved");
     } catch (e) { Alert.alert("Error", e.message); }
   };
@@ -106,14 +112,12 @@ export default function OwnerDashboard({ user, onLogout }) {
   const handleDecline = async (req) => {
     try {
         await updateDoc(doc(db, "requests", req.id), { status: "DECLINED" });
-        
         notifyEmployee(req.requestorUsername, "Request Declined ❌", `Your request for ${req.itemName} was declined.`);
-
         Alert.alert("Declined", "Request has been declined.");
     } catch (e) { Alert.alert("Error", e.message); }
   };
 
-  // --- MERGE LOGIC ---
+  // --- DATA MERGING ---
   useEffect(() => {
     const reportLogs = rawReports.map(r => ({
         id: r.id, uniqueKey: `rep_${r.id}`, itemName: r.name, qty: r.quantity,
@@ -137,11 +141,17 @@ export default function OwnerDashboard({ user, onLogout }) {
     setMergedHistory(combined);
   }, [rawReports, rawRequests, items]);
 
-  const openCheckModal = (item) => { setScannedItem(item); setAdjustQty(1); setShowAdjustModal(true); };
+  // --- QR SCANNING & ADJUSTMENT ---
+  const openCheckModal = (item) => { 
+      setScannedItem(item); 
+      setAdjustQty(1); 
+      setShowAdjustModal(true); 
+  };
   
   const handleBarCodeScanned = ({ data }) => {
     if (scanLock) return; setScanLock(true); Vibration.vibrate(200); setScanning(false);
-    let searchName = data; try { const parsed = JSON.parse(data); if(parsed.name) searchName = parsed.name; } catch(e) {} 
+    let searchName = data; 
+    try { const parsed = JSON.parse(data); if(parsed.name) searchName = parsed.name; } catch(e) {} 
     const foundItem = items.find(i => i.name.toLowerCase() === searchName.toLowerCase());
     if (foundItem) openCheckModal(foundItem); else Alert.alert("Not Found", `Item "${searchName}" not in inventory.`);
     setTimeout(() => setScanLock(false), 2000);
@@ -161,38 +171,32 @@ export default function OwnerDashboard({ user, onLogout }) {
             name: scannedItem.name, type: type === "RESTOCK" ? "RESTOCK" : "SOLD (MANUAL)", 
             quantity: adjustQty, date: new Date().toISOString().split('T')[0], timestamp: serverTimestamp()
         });
-        Alert.alert("Success", "Inventory Updated"); setShowAdjustModal(false);
+        Alert.alert("Success", "Inventory Updated"); 
+        setShowAdjustModal(false);
     } catch (e) { Alert.alert("Error", e.message); }
   };
 
+  // --- UI HELPERS ---
   const totalStockCount = items.reduce((acc, i) => acc + i.quantity, 0);
-  
-  // Excludes Equipment for low stock alerts
-  const lowStock = items.filter(i => 
-    i.type !== 'EQUIPMENT' && 
-    (i.unit === 'box' ? i.quantity <= 5 : i.quantity <= 10)
-  );
+  const lowStock = items.filter(i => i.type !== 'EQUIPMENT' && (i.unit === 'box' ? i.quantity <= 5 : i.quantity <= 10));
 
-  // --- HELPER: RENDER LIST BASED ON TYPE ---
   const renderInventoryList = (filterType) => {
-    // 'CONSUMABLE' maps to 'materials' view logic
     const filteredItems = items.filter(item => {
         const type = item.type || 'CONSUMABLE';
         return type === filterType;
     });
 
-    if (filteredItems.length === 0) {
-        return <Text style={{textAlign:'center', color:'#94a3b8', marginTop: 20}}>No items found.</Text>;
-    }
+    if (filteredItems.length === 0) return <Text style={{textAlign:'center', color:'#94a3b8', marginTop: 20}}>No items found.</Text>;
 
     return filteredItems.map(item => ( 
         <View key={item.id} style={styles.row}>
             <View style={{ flex: 1 }}>
                 <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#0F172A' }}>{item.name}</Text>
-                <Text style={{ color: '#64748B' }}>
-                    In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text>
-                </Text>
+                <Text style={{ color: '#64748B' }}>In Stock: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{item.quantity} {item.unit}</Text></Text>
             </View>
+            <TouchableOpacity onPress={() => openCheckModal(item)} style={{ backgroundColor: '#E2E8F0', padding: 8, borderRadius: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight:'bold', color: '#475569' }}>Adjust</Text>
+            </TouchableOpacity>
         </View> 
     ));
   };
@@ -201,15 +205,12 @@ export default function OwnerDashboard({ user, onLogout }) {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <Text style={{ fontSize: 20, fontWeight: '800', color: '#0F172A' }}>
-            {viewMode === 'dashboard' ? 'OWNER PANEL' :
-             viewMode === 'materials' ? 'MATERIALS' :
-             viewMode === 'equipment' ? 'EQUIPMENT' :
-             viewMode === 'approvals' ? 'APPROVALS' : 'REPORTS'}
+            {viewMode === 'dashboard' ? 'OWNER PANEL' : viewMode.toUpperCase()}
         </Text>
         <TouchableOpacity onPress={onLogout}><Text style={{ color: '#EF4444', fontWeight: 'bold' }}>Logout</Text></TouchableOpacity>
       </View>
 
-      {/* --- UPDATED TAB NAVIGATION (Scrollable if needed, or compact) --- */}
+      {/* --- NAVIGATION --- */}
       <View style={{ flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderColor: '#E2E8F0' }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{flexGrow: 1}}>
             {['dashboard', 'approvals', 'materials', 'equipment', 'reports'].map(tab => (
@@ -258,11 +259,11 @@ export default function OwnerDashboard({ user, onLogout }) {
                 )}
 
                 {lowStock.length > 0 ? (
-                    <View style={[styles.card, { borderLeftWidth: 5, borderLeftColor: '#EF4444' }]}>
+                    <View style={[styles.card, { borderLeftWidth: 5, borderLeftColor: '#EF4444', padding: 15 }]}>
                         <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 10, color: '#B91C1C' }}>⚠️ Low Stock Alerts</Text>
                         {lowStock.map(i => ( <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 }}><Text style={{ color: '#475569' }}>{i.name}</Text><Text style={{ fontWeight: 'bold', color: '#EF4444' }}>{i.quantity} {i.unit}</Text></View> ))}
                     </View>
-                ) : <View style={[styles.card, { backgroundColor: '#ECFDF5', alignItems: 'center' }]}><Text style={{ color: '#059669', fontWeight: 'bold' }}>All Stocks Healthy ✅</Text></View>}
+                ) : <View style={[styles.card, { backgroundColor: '#ECFDF5', alignItems: 'center', padding: 15 }]}><Text style={{ color: '#059669', fontWeight: 'bold' }}>All Stocks Healthy ✅</Text></View>}
             </View>
         )}
 
@@ -270,7 +271,6 @@ export default function OwnerDashboard({ user, onLogout }) {
             <View>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#334155' }}>Pending Approvals</Text>
                 {pendingRequests.length === 0 && <Text style={{ textAlign: 'center', marginTop: 20, color: '#94A3B8' }}>No pending requests.</Text>}
-                
                 {pendingRequests.map(r => (
                     <View key={r.id} style={[styles.card, { padding: 15, marginBottom: 12 }]}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -294,22 +294,16 @@ export default function OwnerDashboard({ user, onLogout }) {
             </View>
         )}
 
-        {/* --- MATERIALS VIEW (Formerly Consumables) --- */}
         {viewMode === 'materials' && (
             <View>
-                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>
-                    Scan QR to Adjust Materials
-                </Text>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>Scan QR to Adjust Materials</Text>
                 {renderInventoryList('CONSUMABLE')}
             </View>
         )}
 
-        {/* --- EQUIPMENT VIEW --- */}
         {viewMode === 'equipment' && (
             <View>
-                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>
-                    Scan QR to Adjust Equipment
-                </Text>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 15 }}>Scan QR to Adjust Equipment</Text>
                 {renderInventoryList('EQUIPMENT')}
             </View>
         )}
@@ -341,29 +335,46 @@ export default function OwnerDashboard({ user, onLogout }) {
           <Text style={{ fontSize: 30 }}>📷</Text>
       </TouchableOpacity>
       
+      {/* --- ADJUSTMENT MODAL (FIXED & CENTERED) --- */}
       <Modal visible={showAdjustModal} transparent animationType="fade">
-          <View style={styles.backdrop}>
-              <View style={[styles.card, { width: '85%', padding: 25 }]}>
-                  <Text style={[styles.menuTitle, { marginBottom: 5 }]}>Inventory Check</Text>
-                  <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 20 }}>Adjusting: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{scannedItem?.name}</Text></Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 30 }}>
-                      <TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#64748B' }]} onPress={() => setAdjustQty(Math.max(1, adjustQty - 1))}>
-                          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>−</Text>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }}>
+              <View style={{ width: '85%', backgroundColor: 'white', borderRadius: 20, padding: 25, elevation: 10, alignItems: 'center' }}>
+                  
+                  <Text style={{ fontSize: 22, fontWeight: '900', color: '#0F172A', marginBottom: 5 }}>Inventory Check</Text>
+                  <Text style={{ color: '#64748B', marginBottom: 20 }}>Adjusting: <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{scannedItem?.name}</Text></Text>
+
+                  {/* Counter */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, marginBottom: 25 }}>
+                      <TouchableOpacity onPress={() => setAdjustQty(Math.max(1, adjustQty - 1))} 
+                          style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: '#64748B', justifyContent: 'center', alignItems: 'center' }}>
+                          <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>-</Text>
                       </TouchableOpacity>
-                      <Text style={{ fontSize: 32, fontWeight: 'bold', marginHorizontal: 30 }}>{adjustQty}</Text>
-                      <TouchableOpacity style={[styles.sellBtn, { width: 50, height: 50, borderRadius: 25, backgroundColor: '#10B981' }]} onPress={() => setAdjustQty(adjustQty + 1)}>
+                      
+                      <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#0F172A' }}>{adjustQty}</Text>
+                      
+                      <TouchableOpacity onPress={() => setAdjustQty(adjustQty + 1)} 
+                          style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' }}>
                           <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold' }}>+</Text>
                       </TouchableOpacity>
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 15, marginBottom: 15 }}>
-                      <TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#EF4444', marginBottom: 0 }]} onPress={() => confirmAdjust("SOLD")}>
-                          <Text style={{ color: 'white', fontWeight: 'bold' }}>REMOVE (Sold)</Text>
+
+                  {/* Buttons */}
+                  <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginBottom: 15 }}>
+                      <TouchableOpacity onPress={() => confirmAdjust("SOLD")} style={{ flex: 1, backgroundColor: '#EF4444', paddingVertical: 15, borderRadius: 12, alignItems: 'center' }}>
+                          <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>REMOVE</Text>
+                          <Text style={{ color: 'white', fontSize: 10 }}>(Sold)</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={[styles.scanBtn, { flex: 1, backgroundColor: '#0369A1', marginBottom: 0 }]} onPress={() => confirmAdjust("RESTOCK")}>
-                          <Text style={{ color: 'white', fontWeight: 'bold' }}>ADD (Restock)</Text>
+
+                      <TouchableOpacity onPress={() => confirmAdjust("RESTOCK")} style={{ flex: 1, backgroundColor: '#0369A1', paddingVertical: 15, borderRadius: 12, alignItems: 'center' }}>
+                          <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 12 }}>ADD</Text>
+                          <Text style={{ color: 'white', fontSize: 10 }}>(Restock)</Text>
                       </TouchableOpacity>
                   </View>
-                  <Button title="Close" color="#64748B" onPress={() => setShowAdjustModal(false)} />
+
+                  <TouchableOpacity onPress={() => setShowAdjustModal(false)} style={{ width: '100%', padding: 15, backgroundColor: '#64748B', borderRadius: 12, alignItems: 'center' }}>
+                      <Text style={{ color: 'white', fontWeight: 'bold' }}>CLOSE</Text>
+                  </TouchableOpacity>
+
               </View>
           </View>
       </Modal>
