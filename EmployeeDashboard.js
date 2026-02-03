@@ -25,7 +25,7 @@ export default function EmployeeDashboard({ user, onLogout }) {
   const [returnModalVisible, setReturnModalVisible] = useState(false);
   const [selectedReturnItem, setSelectedReturnItem] = useState(null);
 
-  // Updated Default View
+  // Default View
   const [viewMode, setViewMode] = useState("dashboard");
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export default function EmployeeDashboard({ user, onLogout }) {
             ...item, 
             qty: newQty, 
             unit: item.unit || 'pcs', 
-            type: item.type || 'materials' 
+            type: item.type || 'CONSUMABLE' 
         };
         return next;
     });
@@ -88,7 +88,7 @@ export default function EmployeeDashboard({ user, onLogout }) {
         await Promise.all(ids.map(id => addDoc(collection(db, "requests"), {
             itemId: id, 
             itemName: cart[id].name, 
-            type: cart[id].type || 'materials',
+            type: cart[id].type || 'CONSUMABLE',
             quantity: cart[id].qty, 
             unit: cart[id].unit,
             requestorName: user.name, 
@@ -134,11 +134,10 @@ export default function EmployeeDashboard({ user, onLogout }) {
 
   const sortedRequests = [...myRequests].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
 
-  // --- NEW HELPER: Render Items based on category ---
+  // --- HELPER: Render Items based on category ---
   const renderInventoryList = (filterType) => {
-      // Filter logic: 'EQUIPMENT' matches perfectly, 'materials' matches 'materials' OR undefined/null
       const filteredItems = items.filter(item => {
-          const type = item.type || 'materials';
+          const type = item.type || 'CONSUMABLE';
           return type === filterType;
       });
 
@@ -182,18 +181,18 @@ export default function EmployeeDashboard({ user, onLogout }) {
       <View style={styles.header}>
         <Text style={{ fontSize: 18, fontWeight: '800', color: '#0F172A' }}>
              {viewMode === 'dashboard' ? 'MY PROFILE' : 
-              viewMode === 'materials' ? 'materials' : 'EQUIPMENT'}
+              viewMode === 'consumables' ? 'CONSUMABLES' : 'EQUIPMENT'}
         </Text>
         <TouchableOpacity onPress={onLogout}><Text style={{ color: '#EF4444', fontWeight: 'bold' }}>Logout</Text></TouchableOpacity>
       </View>
 
-      {/* --- UPDATED NAVIGATION BAR (3 TABS) --- */}
+      {/* --- NAVIGATION BAR --- */}
       <View style={{ flexDirection: 'row', backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' }}>
         <TouchableOpacity onPress={() => setViewMode('dashboard')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='dashboard'?'#0F172A':'transparent' }}>
             <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='dashboard'?'#0F172A':'#94A3B8' }}>DASHBOARD</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setViewMode('materials')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='materials'?'#0F172A':'transparent' }}>
-            <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='materials'?'#0F172A':'#94A3B8' }}>MATERIALS</Text>
+        <TouchableOpacity onPress={() => setViewMode('consumables')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='consumables'?'#0F172A':'transparent' }}>
+            <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='consumables'?'#0F172A':'#94A3B8' }}>CONSUMABLES</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setViewMode('equipment')} style={{ flex: 1, paddingVertical: 15, alignItems: 'center', borderBottomWidth: 3, borderColor: viewMode==='equipment'?'#0F172A':'transparent' }}>
             <Text style={{ fontWeight: 'bold', fontSize: 12, color: viewMode==='equipment'?'#0F172A':'#94A3B8' }}>EQUIPMENT</Text>
@@ -230,10 +229,10 @@ export default function EmployeeDashboard({ user, onLogout }) {
             </View>
         )}
 
-        {/* --- VIEW 2: materials --- */}
-        {viewMode === 'materials' && (
+        {/* --- VIEW 2: CONSUMABLES --- */}
+        {viewMode === 'consumables' && (
             <View>
-                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}></Text>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}>Tap +/- to add Consumables</Text>
                 {renderInventoryList('CONSUMABLE')}
             </View>
         )}
@@ -241,25 +240,26 @@ export default function EmployeeDashboard({ user, onLogout }) {
         {/* --- VIEW 3: EQUIPMENT --- */}
         {viewMode === 'equipment' && (
             <View>
-                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}></Text>
+                <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 10 }}>Tap +/- to Borrow Equipment</Text>
                 {renderInventoryList('EQUIPMENT')}
             </View>
         )}
 
       </ScrollView>
 
-      {/* FLOAT CART BUTTON (Only shows if cart has items) */}
-      {(viewMode === 'materials' || viewMode === 'equipment') && Object.keys(cart).length > 0 && (
+      {/* FLOAT CART BUTTON */}
+      {(viewMode === 'consumables' || viewMode === 'equipment') && Object.keys(cart).length > 0 && (
         <TouchableOpacity style={{ position: 'absolute', bottom: 30, right: 20, backgroundColor: '#0F172A', paddingVertical: 15, paddingHorizontal: 25, borderRadius: 30, elevation: 5 }} onPress={() => setShowCart(true)}>
             <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Review ({Object.keys(cart).length}) ➔</Text>
         </TouchableOpacity>
       )}
 
-      {/* CONFIRMATION MODAL */}
-      <Modal visible={showCart} transparent animationType="slide">
-        <View style={styles.backdrop}>
-            <View style={[styles.card, { width: '90%', maxHeight: '70%', padding: 20 }]}>
-                <Text style={[styles.menuTitle, { marginBottom: 15 }]}>Confirm Requests</Text>
+      {/* CONFIRMATION MODAL - NOW CENTERED */}
+      <Modal visible={showCart} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={[styles.card, { width: '90%', maxHeight: '60%', padding: 20, borderRadius: 12 }]}>
+                <Text style={[styles.menuTitle, { marginBottom: 15, textAlign: 'center' }]}>Confirm Requests</Text>
+                
                 <ScrollView style={{ marginBottom: 20 }}>
                     {Object.values(cart).map(i => ( 
                         <View key={i.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderColor: '#f1f5f9' }}>
@@ -275,6 +275,7 @@ export default function EmployeeDashboard({ user, onLogout }) {
                         </View> 
                     ))}
                 </ScrollView>
+                
                 <View style={{ gap: 10 }}>
                     <Button title="Submit Request" color="#10B981" onPress={submitRequest} />
                     <Button title="Cancel" color="#EF4444" onPress={() => setShowCart(false)} />
@@ -283,15 +284,24 @@ export default function EmployeeDashboard({ user, onLogout }) {
         </View>
       </Modal>
 
-      {/* RETURN MODAL (Unchanged) */}
+      {/* RETURN MODAL - CENTERED */}
       <Modal visible={returnModalVisible} transparent animationType="fade">
-        <View style={styles.backdrop}>
-            <View style={[styles.card, { width: '85%', padding: 25 }]}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={[styles.card, { width: '85%', padding: 25, borderRadius: 12 }]}>
                 <Text style={{ fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 }}>Return Item</Text>
                 <Text style={{ textAlign: 'center', color: '#64748B', marginBottom: 20 }}>Is <Text style={{ fontWeight: 'bold', color: '#0F172A' }}>{selectedReturnItem?.itemName}</Text> in good condition?</Text>
-                <TouchableOpacity onPress={() => processReturn('GOOD')} style={{ backgroundColor: '#10B981', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 10 }}><Text style={{ color: 'white', fontWeight: 'bold' }}>✅ YES - Good Condition</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => processReturn('DAMAGED')} style={{ backgroundColor: '#EF4444', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 10 }}><Text style={{ color: 'white', fontWeight: 'bold' }}>⚠️ NO - Damaged / Lost</Text></TouchableOpacity>
-                <TouchableOpacity onPress={() => setReturnModalVisible(false)} style={{ marginTop: 10 }}><Text style={{ textAlign: 'center', color: '#64748B', fontWeight: 'bold' }}>Cancel</Text></TouchableOpacity>
+                
+                <TouchableOpacity onPress={() => processReturn('GOOD')} style={{ backgroundColor: '#10B981', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 10 }}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>✅ YES - Good Condition</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity onPress={() => processReturn('DAMAGED')} style={{ backgroundColor: '#EF4444', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 10 }}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>⚠️ NO - Damaged / Lost</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity onPress={() => setReturnModalVisible(false)} style={{ marginTop: 10 }}>
+                    <Text style={{ textAlign: 'center', color: '#64748B', fontWeight: 'bold' }}>Cancel</Text>
+                </TouchableOpacity>
             </View>
         </View>
       </Modal>
